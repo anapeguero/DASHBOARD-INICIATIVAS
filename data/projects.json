@@ -1,0 +1,12 @@
+{
+  "projects": [
+    {
+      "id": "mao",
+      "name": "Mao",
+      "displayName": "Sirena Compacta Mao",
+      "file": "data/projects/mao.xlsx",
+      "brand": "Sirena",
+      "status": "En ejecución"
+    }
+  ]
+}
