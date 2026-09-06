@@ -1,0 +1,46 @@
+{
+  "projects": [
+    {
+      "id": "mao",
+      "name": "Mao",
+      "displayName": "Sirena Compacta Mao",
+      "file": "data/projects/mao.xlsx",
+      "brand": "Sirena",
+      "status": "En ejecución",
+      "openingDate": "2026-11-15",
+      "cashflowStart": "2023-05-01",
+      "templateVersion": "04.09.2026",
+      "openingLabel": "15 de noviembre de 2026",
+      "totalRowIndex": 6,
+      "partStartIndex": 20,
+      "approvedUsdCol": 4,
+      "currentDopCol": 8,
+      "currentUsdCol": 9,
+      "baselineLabel": "Presupuesto aprobado",
+      "currentLabel": "Presupuesto vigente",
+      "considerationsSheet": "Puntos pendientes",
+      "pendingSheet": "Puntos pendientes"
+    },
+    {
+      "id": "hispanoamerica",
+      "name": "Hispanoamérica",
+      "displayName": "Sirena Compacta Hispanoamérica",
+      "file": "data/projects/hispanoamerica.xlsx",
+      "brand": "Sirena",
+      "status": "En ejecución",
+      "openingDate": "2026-12-15",
+      "openingLabel": "15 de diciembre de 2026",
+      "cashflowStart": "2025-01-01",
+      "templateVersion": "Hispanoamérica",
+      "totalRowIndex": 5,
+      "partStartIndex": 19,
+      "approvedUsdCol": 4,
+      "currentDopCol": 8,
+      "currentUsdCol": 11,
+      "baselineLabel": "Presupuesto base (Alto Nivel Rev III)",
+      "currentLabel": "Plan detallado vigente",
+      "considerationsSheet": "Consideraciones",
+      "pendingSheet": null
+    }
+  ]
+}
