@@ -1,0 +1,18 @@
+{
+"projects": [
+{
+"id": "mao",
+"name": "Mao",
+"brand": "Sirena",
+"openingDate": "2026-11-15",
+"file": "data/projects/mao.xlsx"
+},
+{
+"id": "hispano",
+"name": "Hispano",
+"brand": "Sirena",
+"openingDate": "2026-12-15",
+"file": "data/projects/hispano.xlsx"
+}
+]
+}
