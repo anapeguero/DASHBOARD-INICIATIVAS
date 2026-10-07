@@ -1,6 +1,6 @@
 /* =========================================================
 DASHBOARD DE SEGUIMIENTO DE INICIATIVAS
-Grupo Ramos
+GRUPO RAMOS
 ========================================================= */
 
 const state = {
@@ -8,10 +8,14 @@ projects: [],
 project: null,
 workbook: null,
 
-// Fuentes principales
-planOI: [],
-budget: [],
+planOI: {
+approved: 0,
+real: 0,
+difference: 0,
+categories: []
+},
 
+budget: [],
 cashflow: [],
 issues: [],
 considerations: [],
@@ -19,9 +23,13 @@ considerations: [],
 approvedBudget: 0,
 currentBudget: 0,
 orderedValue: 0,
+pendingValue: 0,
 savings: 0,
 
 charts: {},
+
+// Referencia general.
+// Las filas de BD Plan Detallado pueden traer su propia tasa.
 exchangeRate: 63
 };
 
@@ -38,12 +46,14 @@ gray: "#cbd7e2",
 ink: "#18324b"
 };
 
-document.addEventListener("DOMContentLoaded", init);
+let countdownInterval = null;
 
 
 /* =========================================================
 INICIO
 ========================================================= */
+
+document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
 
@@ -58,7 +68,7 @@ await loadProjects();
 
 
 /* =========================================================
-CARGAR LISTA DE PROYECTOS
+PROYECTOS
 ========================================================= */
 
 async function loadProjects() {
@@ -95,10 +105,11 @@ localStorage.getItem("selectedProject");
 const initial =
 state.projects.find(
 project => project.id === saved
-) ||
-state.projects[0];
+) || state.projects[0];
 
+if ($("projectSelect")) {
 $("projectSelect").value = initial.id;
+}
 
 await loadProject(initial);
 
@@ -117,10 +128,6 @@ alert(
 }
 
 
-/* =========================================================
-SELECTOR DE PROYECTOS
-========================================================= */
-
 function setupProjectSelector() {
 
 const select = $("projectSelect");
@@ -135,6 +142,7 @@ const option =
 document.createElement("option");
 
 option.value = project.id;
+
 option.textContent =
 project.name || project.id;
 
@@ -165,94 +173,7 @@ await loadProject(project);
 
 
 /* =========================================================
-NAVEGACIÓN
-========================================================= */
-
-function setupNavigation() {
-
-document
-.querySelectorAll("#navTabs button")
-.forEach(button => {
-
-button.addEventListener(
-"click",
-() => {
-openPage(
-button.dataset.page
-);
-}
-);
-
-});
-
-document
-.querySelectorAll("[data-go-page]")
-.forEach(button => {
-
-button.addEventListener(
-"click",
-() => {
-openPage(
-button.dataset.goPage
-);
-}
-);
-
-});
-
-}
-
-
-function openPage(page) {
-
-document
-.querySelectorAll(".page")
-.forEach(section => {
-section.classList.remove(
-"active"
-);
-});
-
-document
-.querySelectorAll(
-"#navTabs button"
-)
-.forEach(button => {
-button.classList.remove(
-"active"
-);
-});
-
-const target =
-$(`page-${page}`);
-
-if (target) {
-target.classList.add(
-"active"
-);
-}
-
-const button =
-document.querySelector(
-`#navTabs button[data-page="${page}"]`
-);
-
-if (button) {
-button.classList.add(
-"active"
-);
-}
-
-window.scrollTo({
-top: 0,
-behavior: "smooth"
-});
-
-}
-
-
-/* =========================================================
-CARGAR EXCEL DEL PROYECTO
+CARGAR PROYECTO
 ========================================================= */
 
 async function loadProject(project) {
@@ -265,17 +186,16 @@ updateProjectLabels(project);
 
 try {
 
-const response =
-await fetch(
-project.file +
-"?v=" +
-Date.now()
+const response = await fetch(
+project.file + "?v=" + Date.now()
 );
 
 if (!response.ok) {
+
 throw new Error(
 `No se encontró ${project.file}`
 );
+
 }
 
 const buffer =
@@ -286,8 +206,15 @@ XLSX.read(
 buffer,
 {
 type: "array",
-cellDates: true
+cellDates: true,
+cellFormula: true,
+cellNF: true
 }
+);
+
+console.log(
+"Hojas encontradas:",
+state.workbook.SheetNames
 );
 
 parseWorkbook();
@@ -296,13 +223,12 @@ renderAll();
 
 } catch (error) {
 
-console.error(error);
+console.error(
+"Error cargando proyecto:",
+error
+);
 
-state.planOI = [];
-state.budget = [];
-state.cashflow = [];
-state.issues = [];
-state.considerations = [];
+resetProjectData();
 
 renderEmptyState();
 
@@ -313,8 +239,31 @@ showLoader(false);
 }
 
 
+function resetProjectData() {
+
+state.planOI = {
+approved: 0,
+real: 0,
+difference: 0,
+categories: []
+};
+
+state.budget = [];
+state.cashflow = [];
+state.issues = [];
+state.considerations = [];
+
+state.approvedBudget = 0;
+state.currentBudget = 0;
+state.orderedValue = 0;
+state.pendingValue = 0;
+state.savings = 0;
+
+}
+
+
 /* =========================================================
-NOMBRES DEL PROYECTO
+ETIQUETAS DEL PROYECTO
 ========================================================= */
 
 function updateProjectLabels(project) {
@@ -358,18 +307,11 @@ setText(
 `Proyecto ${name}`
 );
 
-/*
-Si projects.json tiene openingDate,
-usamos la fecha.
-
-Si no tiene fecha, el dashboard
-sigue funcionando normalmente.
-*/
 
 if (project.openingDate) {
 
 const opening =
-parseDate(
+parseProjectDate(
 project.openingDate
 );
 
@@ -403,25 +345,10 @@ setText(
 "Por definir"
 );
 
-setText(
-"cdDays",
-"—"
-);
-
-setText(
-"cdHours",
-"—"
-);
-
-setText(
-"cdMinutes",
-"—"
-);
-
-setText(
-"cdSeconds",
-"—"
-);
+setText("cdDays", "—");
+setText("cdHours", "—");
+setText("cdMinutes", "—");
+setText("cdSeconds", "—");
 
 setText(
 "countdownStatus",
@@ -434,44 +361,127 @@ setText(
 
 
 /* =========================================================
-LEER EXCEL
+NAVEGACIÓN
+========================================================= */
 
-IMPORTANTE:
+function setupNavigation() {
 
-Plan OI
-= resumen financiero / presupuesto / ahorro
+document
+.querySelectorAll("#navTabs button")
+.forEach(button => {
 
-BD Plan Detallado
-= detalle de compras / OC / proveedores /
-pagos / seguimiento
+button.addEventListener(
+"click",
+() => {
+
+openPage(
+button.dataset.page
+);
+
+}
+);
+
+});
+
+
+document
+.querySelectorAll("[data-go-page]")
+.forEach(button => {
+
+button.addEventListener(
+"click",
+() => {
+
+openPage(
+button.dataset.goPage
+);
+
+}
+);
+
+});
+
+}
+
+
+function openPage(page) {
+
+document
+.querySelectorAll(".page")
+.forEach(section => {
+
+section.classList.remove(
+"active"
+);
+
+});
+
+
+document
+.querySelectorAll(
+"#navTabs button"
+)
+.forEach(button => {
+
+button.classList.remove(
+"active"
+);
+
+});
+
+
+const target =
+$(`page-${page}`);
+
+if (target) {
+target.classList.add("active");
+}
+
+
+const button =
+document.querySelector(
+`#navTabs button[data-page="${page}"]`
+);
+
+if (button) {
+button.classList.add("active");
+}
+
+
+window.scrollTo({
+top: 0,
+behavior: "smooth"
+});
+
+}
+
+
+/* =========================================================
+LEER LIBRO COMPLETO
 ========================================================= */
 
 function parseWorkbook() {
 
-const wb =
-state.workbook;
+const wb = state.workbook;
 
-state.planOI = [];
-state.budget = [];
-state.cashflow = [];
-state.issues = [];
-state.considerations = [];
+resetProjectData();
+
 
 /* =========================
 PLAN OI
 ========================= */
 
-const planOISheet =
+const planSheet =
 findExactSheet(
 wb,
 "Plan OI"
 );
 
-if (planOISheet) {
+if (planSheet) {
 
 state.planOI =
-smartSheetToObjects(
-planOISheet
+parsePlanOI(
+planSheet
 );
 
 } else {
@@ -496,29 +506,55 @@ wb,
 if (bdSheet) {
 
 state.budget =
-smartSheetToObjects(
+parseBDPlanDetallado(
 bdSheet
 );
 
 } else {
 
 console.warn(
-"No se encontró la hoja BD Plan Detallado"
+"No se encontró BD Plan Detallado"
 );
 
 }
 
 
 /* =========================
-OTRAS HOJAS OPCIONALES
+FLUJO DE CAJA
+========================= */
+
+const flujoSheet =
+findExactSheet(
+wb,
+"Flujo de Caja"
+);
+
+if (flujoSheet) {
+
+state.cashflow =
+parseFlujoCaja(
+flujoSheet
+);
+
+} else {
+
+console.warn(
+"No se encontró Flujo de Caja"
+);
+
+}
+
+
+/* =========================
+HOJAS OPCIONALES
 ========================= */
 
 const issueSheet =
 findSheet(
 wb,
 [
+"Puntos pendientes",
 "Pendientes",
-"Issues",
 "Seguimiento"
 ]
 );
@@ -526,7 +562,7 @@ wb,
 if (issueSheet) {
 
 state.issues =
-smartSheetToObjects(
+genericSheetToObjects(
 issueSheet
 );
 
@@ -545,28 +581,1433 @@ wb,
 if (considerationsSheet) {
 
 state.considerations =
-smartSheetToObjects(
+genericSheetToObjects(
 considerationsSheet
 );
 
 }
 
 
-/* =========================
-NORMALIZACIÓN
-========================= */
-
-normalizePlanOI();
-normalizeBudget();
-normalizeIssues();
-
 calculateTotals();
+
+
+console.log(
+"PLAN OI FINAL:",
+state.planOI
+);
+
+console.log(
+"BD FINAL:",
+state.budget
+);
+
+console.log(
+"FLUJO FINAL:",
+state.cashflow
+);
+
+console.log(
+"TOTALES:",
+{
+approved:
+state.approvedBudget,
+
+real:
+state.currentBudget,
+
+savings:
+state.savings,
+
+ordered:
+state.orderedValue,
+
+pending:
+state.pendingValue
+}
+);
 
 }
 
 
 /* =========================================================
-ENCONTRAR HOJAS
+PLAN OI
+========================================================= */
+
+function parsePlanOI(sheet) {
+
+const rows =
+XLSX.utils.sheet_to_json(
+sheet,
+{
+header: 1,
+defval: "",
+raw: true
+}
+);
+
+
+const result = {
+approved: 0,
+real: 0,
+difference: 0,
+categories: []
+};
+
+
+/*
+Primero localizamos la fila:
+TOTAL GENERAL ESTIMADO
+
+En tu plantilla:
+A/B = descripción
+Presupuestado
+Real
+Diferencia
+*/
+
+for (
+let r = 0;
+r < rows.length;
+r++
+) {
+
+const row = rows[r];
+
+let totalColumn = -1;
+
+
+for (
+let c = 0;
+c < row.length;
+c++
+) {
+
+if (
+normalizeText(
+row[c]
+).includes(
+"totalgeneralestimado"
+)
+) {
+
+totalColumn = c;
+break;
+
+}
+
+}
+
+
+if (totalColumn === -1) {
+continue;
+}
+
+
+const numbers = [];
+
+
+for (
+let c =
+totalColumn + 1;
+
+c < row.length;
+
+c++
+) {
+
+const value =
+toNumber(
+row[c]
+);
+
+
+if (
+value !== 0
+) {
+
+numbers.push(value);
+
+}
+
+}
+
+
+if (
+numbers.length >= 2
+) {
+
+result.approved =
+numbers[0];
+
+result.real =
+numbers[1];
+
+result.difference =
+numbers.length >= 3
+? numbers[2]
+: numbers[0] -
+numbers[1];
+
+}
+
+break;
+
+}
+
+
+/*
+Ahora buscamos encabezados:
+Resumen de Partidas
+Presupuestado
+Real
+Diferencia
+*/
+
+let headerRow = -1;
+
+let descriptionCol = -1;
+let approvedCol = -1;
+let realCol = -1;
+let differenceCol = -1;
+
+
+for (
+let r = 0;
+r < Math.min(
+rows.length,
+40
+);
+r++
+) {
+
+const row = rows[r];
+
+
+for (
+let c = 0;
+c < row.length;
+c++
+) {
+
+const text =
+normalizeText(
+row[c]
+);
+
+
+if (
+text.includes(
+"resumendepartidas"
+)
+) {
+
+descriptionCol = c;
+
+}
+
+
+if (
+text ===
+"presupuestado"
+) {
+
+approvedCol = c;
+
+}
+
+
+if (
+text ===
+"real"
+) {
+
+realCol = c;
+
+}
+
+
+if (
+text.includes(
+"diferencia"
+)
+) {
+
+differenceCol = c;
+
+}
+
+}
+
+
+if (
+descriptionCol >= 0 &&
+approvedCol >= 0 &&
+realCol >= 0
+) {
+
+headerRow = r;
+break;
+
+}
+
+}
+
+
+if (
+headerRow >= 0
+) {
+
+for (
+let r =
+headerRow + 1;
+
+r < rows.length;
+
+r++
+) {
+
+const row =
+rows[r];
+
+
+const description =
+String(
+row[
+descriptionCol
+] || ""
+).trim();
+
+
+if (!description) {
+continue;
+}
+
+
+const normalized =
+normalizeText(
+description
+);
+
+
+/*
+No volvemos a agregar
+TOTAL GENERAL ESTIMADO
+como categoría.
+*/
+
+if (
+normalized.includes(
+"totalgeneralestimado"
+)
+) {
+
+continue;
+
+}
+
+
+const approved =
+approvedCol >= 0
+? toNumber(
+row[
+approvedCol
+]
+)
+: 0;
+
+
+const real =
+realCol >= 0
+? toNumber(
+row[
+realCol
+]
+)
+: 0;
+
+
+const difference =
+differenceCol >= 0
+? toNumber(
+row[
+differenceCol
+]
+)
+: approved - real;
+
+
+if (
+approved !== 0 ||
+real !== 0 ||
+difference !== 0
+) {
+
+result.categories.push({
+
+partida:
+description,
+
+approved,
+
+current:
+real,
+
+savings:
+difference
+
+});
+
+}
+
+}
+
+}
+
+
+/*
+Si Diferencia no fue encontrada
+pero sí tenemos ambos totales.
+*/
+
+if (
+!result.difference &&
+(
+result.approved ||
+result.real
+)
+) {
+
+result.difference =
+result.approved -
+result.real;
+
+}
+
+
+return result;
+
+}
+
+
+/* =========================================================
+BD PLAN DETALLADO
+========================================================= */
+
+function parseBDPlanDetallado(sheet) {
+
+const rows =
+XLSX.utils.sheet_to_json(
+sheet,
+{
+header: 1,
+defval: "",
+raw: true
+}
+);
+
+
+if (!rows.length) {
+return [];
+}
+
+
+/*
+Detectamos la fila real de encabezados.
+En tu archivo actualmente es fila 4,
+pero lo dejamos robusto para otros
+proyectos.
+*/
+
+let headerIndex = -1;
+
+
+for (
+let r = 0;
+r < Math.min(
+rows.length,
+15
+);
+r++
+) {
+
+const normalized =
+rows[r].map(
+cell =>
+normalizeText(
+cell
+)
+);
+
+
+const hasPartidas =
+normalized.some(
+x =>
+x === "partidas" ||
+x === "partida"
+);
+
+
+const hasItem =
+normalized.some(
+x =>
+x === "item"
+);
+
+
+const hasPO =
+normalized.some(
+x =>
+x.includes(
+"ordendecompra"
+)
+);
+
+
+if (
+hasPartidas &&
+hasItem &&
+hasPO
+) {
+
+headerIndex = r;
+break;
+
+}
+
+}
+
+
+if (
+headerIndex === -1
+) {
+
+console.warn(
+"No se detectaron encabezados en BD Plan Detallado."
+);
+
+return [];
+
+}
+
+
+const headers =
+makeUniqueHeaders(
+rows[
+headerIndex
+]
+);
+
+
+const result = [];
+
+
+for (
+let r =
+headerIndex + 1;
+
+r < rows.length;
+
+r++
+) {
+
+const row =
+rows[r];
+
+
+if (
+row.every(
+cell =>
+String(
+cell ?? ""
+).trim() ===
+""
+)
+) {
+
+continue;
+
+}
+
+
+const obj = {};
+
+
+headers.forEach(
+(header, index) => {
+
+obj[header] =
+row[index] ?? "";
+
+}
+);
+
+
+const partida =
+getColumnValue(
+obj,
+[
+"Partidas",
+"Partida"
+]
+);
+
+
+const capexType =
+getColumnValue(
+obj,
+[
+"OI / Capex Tipo Ppto",
+"OI Capex Tipo Ppto",
+"Capex Tipo Ppto"
+]
+);
+
+
+const plan =
+getColumnValue(
+obj,
+[
+"Plan"
+]
+);
+
+
+const item =
+getColumnValue(
+obj,
+[
+"Item",
+"Ítem"
+]
+);
+
+
+const originalPO =
+getColumnValue(
+obj,
+[
+"Orden de compra",
+"Orden de Compra",
+"OC"
+]
+);
+
+
+const date =
+getColumnValue(
+obj,
+[
+"Fecha",
+"Fecha OC"
+]
+);
+
+
+const quantity =
+toNumber(
+getColumnValue(
+obj,
+[
+"Cant.",
+"Cant",
+"Cantidad"
+]
+)
+);
+
+
+const currency =
+String(
+getColumnValue(
+obj,
+[
+"Mon",
+"Moneda"
+]
+) ||
+"USD"
+).trim();
+
+
+const rate =
+toNumber(
+getColumnValue(
+obj,
+[
+"Tasa"
+]
+)
+);
+
+
+const unitPrice =
+toNumber(
+getColumnValue(
+obj,
+[
+"Precio Und",
+"Precio Unitario",
+"Precio"
+]
+)
+);
+
+
+const netValueDOP =
+toNumber(
+getColumnValue(
+obj,
+[
+"Valor Neto [DOP]",
+"Valor Neto DOP",
+"Valor Neto"
+]
+)
+);
+
+
+const liquidation =
+toNumber(
+getColumnValue(
+obj,
+[
+"Liquid. [%]",
+"Liquid.",
+"Liquidación",
+"Liquidacion"
+]
+)
+);
+
+
+const budgetDOP =
+toNumber(
+getColumnValue(
+obj,
+[
+"Ppto. Orden Interna [DOP]",
+"Ppto Orden Interna DOP",
+"Presupuesto Orden Interna DOP"
+]
+)
+);
+
+
+const budgetUSD =
+toNumber(
+getColumnValue(
+obj,
+[
+"Ppto. Orden Interna [USD]",
+"Ppto Orden Interna USD",
+"Presupuesto Orden Interna USD"
+]
+)
+);
+
+
+const comment =
+String(
+getColumnValue(
+obj,
+[
+"Comentario",
+"Comentarios",
+"Observación",
+"Observacion"
+]
+) || ""
+).trim();
+
+
+const supplier =
+String(
+getColumnValue(
+obj,
+[
+"Proveedor"
+]
+) || ""
+).trim();
+
+
+const totalCashflow =
+toNumber(
+getColumnValue(
+obj,
+[
+"Total Flujo Caja",
+"Total Flujo de Caja"
+]
+)
+);
+
+
+const observation =
+String(
+getColumnValue(
+obj,
+[
+"Observación",
+"Observacion"
+]
+) || ""
+).trim();
+
+
+const validPO =
+isValidPurchaseOrder(
+originalPO
+);
+
+
+const payments = [];
+
+
+/*
+Pago 1 a Pago 5 según la
+estructura actual.
+*/
+
+for (
+let p = 1;
+p <= 5;
+p++
+) {
+
+const period =
+toNumber(
+getColumnValue(
+obj,
+[
+`Per.P${p}`,
+`Per P${p}`
+]
+)
+);
+
+
+const advance =
+toNumber(
+getColumnValue(
+obj,
+[
+`Av.P${p} [%]`,
+`Av.P${p}`,
+`Av P${p}`
+]
+)
+);
+
+
+const amount =
+toNumber(
+getColumnValue(
+obj,
+[
+`Pago ${p}`,
+`Pago${p}`
+]
+)
+);
+
+
+if (
+period > 0 ||
+amount !== 0
+) {
+
+payments.push({
+
+number:
+p,
+
+period,
+
+date:
+periodToDate(
+period
+),
+
+advance,
+
+amount
+
+});
+
+}
+
+}
+
+
+/*
+Ignorar filas realmente vacías.
+*/
+
+if (
+!partida &&
+!item &&
+!netValueDOP &&
+!budgetDOP &&
+!budgetUSD &&
+!originalPO
+) {
+
+continue;
+
+}
+
+
+result.push({
+
+raw:
+obj,
+
+partida:
+String(
+partida ||
+"Sin partida"
+).trim(),
+
+capexType:
+String(
+capexType ||
+""
+).trim(),
+
+plan,
+
+item:
+String(
+item ||
+"Sin descripción"
+).trim(),
+
+originalPO,
+
+po:
+validPO
+? String(
+originalPO
+).trim()
+: "",
+
+hasPO:
+validPO,
+
+date,
+
+quantity,
+
+currency,
+
+rate,
+
+unitPrice,
+
+netValue:
+netValueDOP,
+
+netValueDOP,
+
+liquidation,
+
+internalBudgetDOP:
+budgetDOP,
+
+internalBudgetUSD:
+budgetUSD,
+
+supplier,
+
+comment,
+
+observation,
+
+payments,
+
+totalCashflow,
+
+/*
+Para las vistas de compras
+trabajamos en DOP.
+*/
+
+current:
+budgetDOP,
+
+ordered:
+validPO
+? netValueDOP
+: 0,
+
+status:
+validPO
+? "Con OC"
+: supplier
+? "Pendiente de compra"
+: "Sin proveedor"
+
+});
+
+}
+
+
+return result;
+
+}
+
+
+/* =========================================================
+VALIDAR ORDEN DE COMPRA
+
+"Plan" NO es una OC.
+"Pendiente de compra" NO es una OC.
+========================================================= */
+
+function isValidPurchaseOrder(value) {
+
+if (
+value === null ||
+value === undefined
+) {
+
+return false;
+
+}
+
+
+const text =
+String(value)
+.trim();
+
+
+if (!text) {
+return false;
+}
+
+
+const normalized =
+normalizeText(text);
+
+
+const invalid = [
+"plan",
+"pendiente",
+"pendientedecompra",
+"sinoc",
+"noaplica",
+"na",
+"-"
+];
+
+
+if (
+invalid.includes(
+normalized
+)
+) {
+
+return false;
+
+}
+
+
+/*
+Las órdenes reales que vimos
+tienen varios dígitos.
+*/
+
+const digits =
+text.replace(
+/\D/g,
+""
+);
+
+
+return (
+digits.length >= 6
+);
+
+}
+
+
+/* =========================================================
+PERÍODOS
+
+Per.P = 1 -> Enero 2025
+Per.P = 2 -> Febrero 2025
+...
+Per.P = 12 -> Diciembre 2025
+Per.P = 13 -> Enero 2026
+========================================================= */
+
+function periodToDate(period) {
+
+const p =
+Number(period);
+
+
+if (
+!Number.isFinite(p) ||
+p <= 0
+) {
+
+return null;
+
+}
+
+
+return new Date(
+2025,
+p - 1,
+1
+);
+
+}
+
+
+/* =========================================================
+FLUJO DE CAJA
+========================================================= */
+
+function parseFlujoCaja(sheet) {
+
+const rows =
+XLSX.utils.sheet_to_json(
+sheet,
+{
+header: 1,
+defval: "",
+raw: true
+}
+);
+
+
+if (!rows.length) {
+return [];
+}
+
+
+/*
+Buscamos fila P1, P2, P3...
+*/
+
+let periodRow = -1;
+
+
+for (
+let r = 0;
+r < Math.min(
+rows.length,
+30
+);
+r++
+) {
+
+const matches =
+rows[r].filter(
+cell =>
+/^p\d+$/i.test(
+String(
+cell || ""
+).trim()
+)
+).length;
+
+
+if (
+matches >= 3
+) {
+
+periodRow = r;
+break;
+
+}
+
+}
+
+
+if (
+periodRow === -1
+) {
+
+console.warn(
+"No se encontró P1/P2/P3 en Flujo de Caja."
+);
+
+return [];
+
+}
+
+
+const periods = [];
+
+
+rows[
+periodRow
+].forEach(
+(cell, column) => {
+
+const text =
+String(
+cell || ""
+).trim();
+
+
+const match =
+text.match(
+/^P(\d+)$/i
+);
+
+
+if (!match) {
+return;
+}
+
+
+const period =
+Number(
+match[1]
+);
+
+
+periods.push({
+
+column,
+
+period,
+
+date:
+periodToDate(
+period
+)
+
+});
+
+}
+);
+
+
+if (!periods.length) {
+return [];
+}
+
+
+const firstPeriodColumn =
+Math.min(
+...periods.map(
+item =>
+item.column
+)
+);
+
+
+const result = [];
+
+
+for (
+let r =
+periodRow + 1;
+
+r < rows.length;
+
+r++
+) {
+
+const row =
+rows[r];
+
+
+/*
+Encontramos la descripción
+más cercana hacia la izquierda
+de P1.
+*/
+
+let description = "";
+
+
+for (
+let c =
+firstPeriodColumn - 1;
+
+c >= 0;
+
+c--
+) {
+
+const candidate =
+String(
+row[c] || ""
+).trim();
+
+
+if (candidate) {
+
+description =
+candidate;
+
+break;
+
+}
+
+}
+
+
+periods.forEach(
+periodInfo => {
+
+const amount =
+toNumber(
+row[
+periodInfo.column
+]
+);
+
+
+if (
+amount === 0
+) {
+
+return;
+
+}
+
+
+result.push({
+
+partida:
+description ||
+"Sin partida",
+
+period:
+periodInfo.period,
+
+date:
+periodInfo.date,
+
+amount,
+
+/*
+La hoja de flujo que vimos
+trabaja con los valores
+consolidados del proyecto.
+*/
+
+dop:
+amount
+
+});
+
+}
+);
+
+}
+
+
+return result;
+
+}
+
+
+/* =========================================================
+TOTALES GENERALES
+========================================================= */
+
+function calculateTotals() {
+
+/*
+PLAN OI:
+TOTAL GENERAL ESTIMADO
+
+Presupuestado
+Real
+Diferencia
+
+Estos KPI permanecen en USD
+porque así está Plan OI.
+*/
+
+state.approvedBudget =
+toNumber(
+state.planOI.approved
+);
+
+
+state.currentBudget =
+toNumber(
+state.planOI.real
+);
+
+
+state.savings =
+toNumber(
+state.planOI.difference
+);
+
+
+if (
+!state.savings &&
+(
+state.approvedBudget ||
+state.currentBudget
+)
+) {
+
+state.savings =
+state.approvedBudget -
+state.currentBudget;
+
+}
+
+
+/*
+COMPRAS:
+Valor Neto [DOP]
+únicamente cuando hay OC válida.
+*/
+
+state.orderedValue =
+sum(
+state.budget
+.filter(
+row =>
+row.hasPO
+)
+.map(
+row =>
+row.netValueDOP
+)
+);
+
+
+/*
+Pendiente de compra en DOP:
+presupuesto de OI menos OC colocadas.
+*/
+
+const detailedBudgetDOP =
+sum(
+state.budget.map(
+row =>
+row.internalBudgetDOP
+)
+);
+
+
+state.pendingValue =
+Math.max(
+detailedBudgetDOP -
+state.orderedValue,
+0
+);
+
+}
+
+
+/* =========================================================
+HOJAS
 ========================================================= */
 
 function findExactSheet(
@@ -578,11 +2019,16 @@ const found =
 workbook.SheetNames.find(
 name =>
 normalizeText(name) ===
-normalizeText(requestedName)
+normalizeText(
+requestedName
+)
 );
 
+
 return found
-? workbook.Sheets[found]
+? workbook.Sheets[
+found
+]
 : null;
 
 }
@@ -602,16 +2048,22 @@ const exact =
 workbook.SheetNames.find(
 name =>
 normalizeText(name) ===
-normalizeText(candidate)
+normalizeText(
+candidate
+)
 );
 
+
 if (exact) {
+
 return workbook.Sheets[
 exact
 ];
+
 }
 
 }
+
 
 for (
 const candidate
@@ -629,13 +2081,17 @@ candidate
 )
 );
 
+
 if (partial) {
+
 return workbook.Sheets[
 partial
 ];
+
 }
 
 }
+
 
 return null;
 
@@ -643,150 +2099,30 @@ return null;
 
 
 /* =========================================================
-CONVERTIR HOJA A OBJETOS
-Detecta automáticamente la fila de encabezados
+LECTOR GENÉRICO
 ========================================================= */
 
-function smartSheetToObjects(sheet) {
+function genericSheetToObjects(sheet) {
 
-const rows =
-XLSX.utils.sheet_to_json(
+return XLSX.utils.sheet_to_json(
 sheet,
 {
-header: 1,
 defval: "",
 raw: false
 }
 );
 
-if (!rows.length) {
-return [];
 }
 
-let headerIndex = 0;
-let bestScore = -1;
 
-const keywords = [
-"partida",
-"item",
-"orden",
-"proveedor",
-"plan",
-"total",
-"ppto",
-"valor",
-"mon",
-"pago",
-"per.p"
-];
-
-const limit =
-Math.min(
-rows.length,
-20
-);
-
-for (
-let i = 0;
-i < limit;
-i++
-) {
-
-const row =
-rows[i];
-
-let score = 0;
-
-row.forEach(cell => {
-
-const text =
-normalizeText(cell);
-
-keywords.forEach(
-keyword => {
-
-if (
-text.includes(
-normalizeText(
-keyword
-)
-)
-) {
-score++;
-}
-
-}
-);
-
-});
-
-if (score > bestScore) {
-
-bestScore = score;
-headerIndex = i;
-
-}
-
-}
-
-const headers =
-makeUniqueHeaders(
-rows[headerIndex]
-);
-
-const data = [];
-
-for (
-let i =
-headerIndex + 1;
-
-i < rows.length;
-
-i++
-) {
-
-const row =
-rows[i];
-
-const object = {};
-
-let hasData = false;
-
-headers.forEach(
-(header, index) => {
-
-if (!header) return;
-
-const value =
-row[index] ?? "";
-
-object[header] =
-value;
-
-if (
-String(value)
-.trim() !== ""
-) {
-hasData = true;
-}
-
-}
-);
-
-if (hasData) {
-data.push(object);
-}
-
-}
-
-return data;
-
-}
-
+/* =========================================================
+HEADERS ÚNICOS
+========================================================= */
 
 function makeUniqueHeaders(row) {
 
 const used = {};
+
 
 return row.map(
 (value, index) => {
@@ -796,25 +2132,34 @@ String(
 value || ""
 ).trim();
 
+
 if (!name) {
+
 name =
 `Columna_${index + 1}`;
+
 }
 
+
+const original =
+name;
+
+
 if (
-used[name] !== undefined
+used[original]
 ) {
 
-used[name]++;
+used[original]++;
 
 name =
-`${name}_${used[name]}`;
+`${original}_${used[original]}`;
 
 } else {
 
-used[name] = 1;
+used[original] = 1;
 
 }
+
 
 return name;
 
@@ -825,729 +2170,67 @@ return name;
 
 
 /* =========================================================
-NORMALIZAR PLAN OI
+BUSCAR VALOR DE COLUMNA
 ========================================================= */
 
-function normalizePlanOI() {
+function getColumnValue(
+object,
+candidates
+) {
 
-state.planOI =
-state.planOI
-.map(
-(row, index) => {
-
-const partida =
-valueFrom(
-row,
-[
-"Partida",
-"Partidas",
-"Descripción",
-"Descripcion",
-"Concepto"
-]
-) ||
-`Partida ${index + 1}`;
-
-
-/*
-PLAN OI puede tener encabezados
-repetidos de Total USD/DOP.
-
-Por eso buscamos primero
-los nombres más específicos
-y luego utilizamos detección
-por posición/encabezado.
-*/
-
-const financial =
-extractPlanOIFinancials(
-row
-);
-
-return {
-
-raw: row,
-
-partida,
-
-approved:
-financial.approved,
-
-current:
-financial.current,
-
-savings:
-financial.savings
-
-};
-
-}
-)
-.filter(
-row =>
-row.approved ||
-row.current ||
-row.savings ||
-(
-row.partida &&
-!row.partida.startsWith(
-"Partida "
-)
-)
-);
-
-}
-
-
-/* =========================================================
-EXTRAER VALORES FINANCIEROS PLAN OI
-========================================================= */
-
-function extractPlanOIFinancials(row) {
-
-const entries =
-Object.entries(row);
-
-let approved = 0;
-let current = 0;
-let savings = 0;
-
-
-/* AHORRO */
-
-savings =
-numberFrom(
-row,
-[
-"Ahorro según ejecución",
-"Ahorro segun ejecucion",
-"Ahorro",
-"Savings"
-]
+const keys =
+Object.keys(
+object
 );
 
 
-/*
-BUSCAR COLUMNAS DOP
-*/
+for (
+const candidate
+of candidates
+) {
 
-const dopValues = [];
+const target =
+normalizeText(
+candidate
+);
 
-entries.forEach(
-([key, value]) => {
 
-const normalized =
-normalizeText(key);
+const exact =
+keys.find(
+key =>
+normalizeText(
+key
+) ===
+target
+);
+
 
 if (
-normalized.includes(
-"totaldop"
-) ||
-normalized.includes(
-"plandop"
-) ||
-normalized.includes(
-"presupuestodop"
-)
+exact !== undefined
 ) {
 
-const n =
-toNumber(value);
+const value =
+object[exact];
+
 
 if (
-Number.isFinite(n)
-) {
-dopValues.push(n);
-}
-
-}
-
-}
-);
-
-
-/*
-Si existen dos columnas DOP:
-primera = aprobado
-segunda = vigente.
-
-Si existe una sola, se utiliza
-como vigente.
-*/
-
-if (
-dopValues.length >= 2
+value !== undefined &&
+value !== null &&
+String(value)
+.trim() !==
+""
 ) {
 
-approved =
-dopValues[0];
+return value;
 
-current =
-dopValues[
-dopValues.length - 1
-];
+}
 
-} else if (
-dopValues.length === 1
-) {
-
-current =
-dopValues[0];
+}
 
 }
 
 
-/*
-Nombres específicos si existen
-*/
-
-const approvedNamed =
-numberFrom(
-row,
-[
-"Plan detallado Aprobado",
-"Plan Detallado Aprobado",
-"Presupuesto Aprobado",
-"Aprobado DOP"
-]
-);
-
-const currentNamed =
-numberFrom(
-row,
-[
-"Plan Detallado en ejecución",
-"Plan Detallado en ejecucion",
-"Presupuesto Vigente",
-"Plan Vigente"
-]
-);
-
-
-if (approvedNamed) {
-approved =
-approvedNamed;
-}
-
-if (currentNamed) {
-current =
-currentNamed;
-}
-
-
-/*
-Si tenemos vigente + ahorro,
-podemos reconstruir aprobado.
-*/
-
-if (
-!approved &&
-current &&
-savings
-) {
-
-approved =
-current + savings;
-
-}
-
-
-/*
-Si tenemos aprobado + ahorro,
-reconstruimos vigente.
-*/
-
-if (
-approved &&
-!current &&
-savings
-) {
-
-current =
-approved - savings;
-
-}
-
-
-return {
-approved,
-current,
-savings
-};
-
-}
-
-
-/* =========================================================
-NORMALIZAR BD PLAN DETALLADO
-========================================================= */
-
-function normalizeBudget() {
-
-state.budget =
-state.budget
-.map(
-(row, index) => {
-
-const partida =
-valueFrom(
-row,
-[
-"Partidas",
-"Partida",
-"Gran Partida"
-]
-) ||
-"Sin partida";
-
-
-const capexType =
-valueFrom(
-row,
-[
-"OI / Capex Tipo Ppto",
-"OI Capex Tipo Ppto",
-"Capex Tipo Ppto",
-"OI"
-]
-);
-
-
-const plan =
-valueFrom(
-row,
-[
-"Plan"
-]
-);
-
-
-const item =
-valueFrom(
-row,
-[
-"Item",
-"Ítem",
-"Activo",
-"Descripción",
-"Descripcion"
-]
-) ||
-`Ítem ${index + 1}`;
-
-
-const po =
-valueFrom(
-row,
-[
-"Orden de compra",
-"Orden de Compra",
-"OC",
-"PO"
-]
-);
-
-
-const date =
-valueFrom(
-row,
-[
-"Fecha",
-"Fecha OC"
-]
-);
-
-
-const quantity =
-numberFrom(
-row,
-[
-"Cant.",
-"Cant",
-"Cantidad"
-]
-);
-
-
-const currency =
-valueFrom(
-row,
-[
-"Mon",
-"Moneda",
-"Currency"
-]
-) ||
-"DOP";
-
-
-const rate =
-numberFrom(
-row,
-[
-"Tasa",
-"Exchange Rate"
-]
-);
-
-
-const unitPrice =
-numberFrom(
-row,
-[
-"Precio Und",
-"Precio Unitario",
-"Precio"
-]
-);
-
-
-const netValue =
-numberFrom(
-row,
-[
-"Valor Neto [DOP]",
-"Valor Neto DOP",
-"Valor Neto"
-]
-);
-
-
-const liquidation =
-numberFrom(
-row,
-[
-"Liquid.",
-"Liquidación",
-"Liquidacion"
-]
-);
-
-
-const internalBudgetDOP =
-numberFrom(
-row,
-[
-"Ppto. Orden Interna [DOP]",
-"Ppto Orden Interna DOP",
-"Presupuesto Orden Interna DOP"
-]
-);
-
-
-const internalBudgetUSD =
-numberFrom(
-row,
-[
-"Ppto. Orden Interna [USD]",
-"Ppto Orden Interna USD",
-"Presupuesto Orden Interna USD"
-]
-);
-
-
-const comment =
-valueFrom(
-row,
-[
-"Comentario",
-"Comentarios",
-"Observación",
-"Observacion"
-]
-);
-
-
-const supplier =
-valueFrom(
-row,
-[
-"Proveedor",
-"Supplier"
-]
-);
-
-
-/*
-Para el dashboard:
-
-Presupuesto = Ppto Orden Interna DOP
-
-Ejecutado/comprometido por OC =
-Valor Neto DOP cuando existe OC
-*/
-
-const budget =
-internalBudgetDOP ||
-netValue;
-
-
-const ordered =
-po
-? netValue
-: 0;
-
-
-return {
-
-raw: row,
-
-partida,
-capexType,
-plan,
-item,
-po,
-date,
-quantity,
-currency,
-rate,
-unitPrice,
-netValue,
-liquidation,
-internalBudgetDOP,
-internalBudgetUSD,
-comment,
-supplier,
-
-current:
-budget,
-
-ordered,
-
-status:
-determinePurchaseStatus(
-po,
-ordered,
-supplier
-)
-
-};
-
-}
-)
-.filter(
-row =>
-row.item ||
-row.current ||
-row.netValue ||
-row.po
-);
-
-}
-
-
-/* =========================================================
-ESTADO DE COMPRA
-========================================================= */
-
-function determinePurchaseStatus(
-po,
-ordered,
-supplier
-) {
-
-if (
-po ||
-ordered > 0
-) {
-
-return "Con OC";
-
-}
-
-if (!supplier) {
-
-return "Sin proveedor";
-
-}
-
-return "Pendiente de compra";
-
-}
-
-
-/* =========================================================
-NORMALIZAR PENDIENTES
-========================================================= */
-
-function normalizeIssues() {
-
-state.issues =
-state.issues.map(
-(row, index) => ({
-
-title:
-valueFrom(
-row,
-[
-"Pendiente",
-"Tema",
-"Issue",
-"Actividad",
-"Descripción",
-"Descripcion"
-]
-) ||
-`Pendiente ${index + 1}`,
-
-owner:
-valueFrom(
-row,
-[
-"Responsable",
-"Owner",
-"Líder",
-"Lider"
-]
-) ||
-"Sin responsable",
-
-comment:
-valueFrom(
-row,
-[
-"Comentario",
-"Comentarios",
-"Observación",
-"Observacion"
-]
-) || "",
-
-status:
-valueFrom(
-row,
-[
-"Estado",
-"Status"
-]
-) ||
-"Abierto"
-
-})
-);
-
-}
-
-
-/* =========================================================
-TOTALES
-
-PLAN OI = presupuesto ejecutivo
-BD = órdenes de compra
-========================================================= */
-
-function calculateTotals() {
-
-/*
-Primero intentamos obtener presupuesto
-desde Plan OI.
-*/
-
-let approved =
-sum(
-state.planOI.map(
-row =>
-row.approved
-)
-);
-
-let current =
-sum(
-state.planOI.map(
-row =>
-row.current
-)
-);
-
-let savings =
-sum(
-state.planOI.map(
-row =>
-row.savings
-)
-);
-
-
-/*
-Si Plan OI no devuelve vigente,
-utilizamos BD Plan Detallado.
-*/
-
-if (!current) {
-
-current =
-sum(
-state.budget.map(
-row =>
-row.internalBudgetDOP
-)
-);
-
-}
-
-
-/*
-Si aprobado no está explícito
-pero tenemos vigente y ahorro.
-*/
-
-if (
-!approved &&
-current
-) {
-
-approved =
-current +
-savings;
-
-}
-
-
-/*
-Si ahorro no está explícito.
-*/
-
-if (
-!savings &&
-approved
-) {
-
-savings =
-approved -
-current;
-
-}
-
-
-/*
-Valor con OC sale del BD.
-*/
-
-const ordered =
-sum(
-state.budget
-.filter(
-row =>
-row.po
-)
-.map(
-row =>
-row.netValue
-)
-);
-
-
-state.approvedBudget =
-approved;
-
-state.currentBudget =
-current;
-
-state.orderedValue =
-ordered;
-
-state.savings =
-savings;
+return "";
 
 }
 
@@ -1574,83 +2257,111 @@ RESUMEN EJECUTIVO
 
 function renderOverview() {
 
+/*
+PLAN OI está en USD.
+*/
+
 const approved =
 state.approvedBudget;
 
 const current =
 state.currentBudget;
 
-const ordered =
-state.orderedValue;
-
-const pending =
-Math.max(
-current - ordered,
-0
-);
-
 const saving =
-state.savings ||
-(
-approved -
-current
-);
+state.savings;
+
 
 const savingPct =
 approved
 ? saving / approved
 : 0;
 
+
+/*
+Compras detalladas están en DOP.
+*/
+
+const orderedDOP =
+state.orderedValue;
+
+const pendingDOP =
+state.pendingValue;
+
+
+/*
+Para avance usamos el presupuesto
+detallado DOP contra OC DOP.
+*/
+
+const detailedBudgetDOP =
+sum(
+state.budget.map(
+row =>
+row.internalBudgetDOP
+)
+);
+
+
 const progress =
-current
-? ordered / current
+detailedBudgetDOP
+? orderedDOP /
+detailedBudgetDOP
 : 0;
 
 
 setText(
 "kpiApprovedBudget",
-money(approved)
+usd(approved)
 );
+
 
 setText(
 "kpiBudget",
-money(current)
+usd(current)
 );
+
 
 setText(
 "kpiOrdered",
-money(ordered)
+money(orderedDOP)
 );
+
 
 setText(
 "kpiPendingBuy",
-money(pending)
+money(pendingDOP)
 );
+
 
 setText(
 "kpiWeightedProgress",
 percent(progress)
 );
 
+
 setText(
 "kpiOpenIssues",
-state.issues.length
+getOpenIssuesCount()
 );
+
 
 setText(
 "overviewDiscount",
-money(saving)
+usd(saving)
 );
+
 
 setText(
 "overviewDiscountPct",
-percent(savingPct)
+percent(
+savingPct
+)
 );
 
 
 renderHealth(
 progress,
-pending
+pendingDOP
 );
 
 renderBudgetMix();
@@ -1665,7 +2376,7 @@ renderAttentionList();
 
 
 /* =========================================================
-PROJECT HEALTH
+HEALTH
 ========================================================= */
 
 function renderHealth(
@@ -1678,20 +2389,23 @@ $("healthStrip");
 
 if (!container) return;
 
+
 const withPO =
 state.budget.filter(
 row =>
-row.status ===
-"Con OC"
+row.hasPO
 ).length;
+
 
 const total =
 state.budget.length;
+
 
 const coverage =
 total
 ? withPO / total
 : 0;
+
 
 const noSupplier =
 state.budget.filter(
@@ -1700,19 +2414,17 @@ row =>
 ).length;
 
 
-const health = [
+const items = [
 
 {
 title:
-"Avance financiero",
+"Avance de compras",
 
 value:
 percent(progress),
 
 text:
-progress >= .75
-? "Buen nivel de colocación"
-: "Existe presupuesto pendiente",
+"OC colocadas vs presupuesto detallado",
 
 color:
 progress >= .75
@@ -1722,13 +2434,13 @@ progress >= .75
 
 {
 title:
-"Cobertura de compras",
+"Cobertura de OC",
 
 value:
 percent(coverage),
 
 text:
-`${withPO} de ${total} ítems con OC`,
+`${withPO} de ${total} registros con OC`,
 
 color:
 coverage >= .75
@@ -1744,13 +2456,12 @@ value:
 money(pending),
 
 text:
-"Presupuesto todavía no colocado",
+"Presupuesto DOP todavía no colocado",
 
 color:
-pending <=
-state.currentBudget * .2
-? "good"
-: "warn"
+pending > 0
+? "warn"
+: "good"
 },
 
 {
@@ -1758,10 +2469,12 @@ title:
 "Sin proveedor",
 
 value:
-String(noSupplier),
+String(
+noSupplier
+),
 
 text:
-"Ítems sin proveedor definido",
+"Registros sin proveedor",
 
 color:
 noSupplier
@@ -1773,7 +2486,7 @@ noSupplier
 
 
 container.innerHTML =
-health.map(
+items.map(
 item => `
 
 <div class="health-item">
@@ -1812,36 +2525,39 @@ item.text
 
 
 /* =========================================================
-GRÁFICA PRESUPUESTO POR PARTIDA
+GRÁFICA PLAN OI
 ========================================================= */
 
 function renderBudgetMix() {
 
-const source =
-state.planOI.some(
-row => row.current
+const categories =
+state.planOI.categories
+.filter(
+row =>
+row.current !== 0
 )
-? state.planOI
-: state.budget;
-
-
-const grouped =
-groupSum(
-source,
-"partida",
-"current"
-);
+.slice(0, 15);
 
 
 createChart(
 "budgetMixChart",
 "doughnut",
-grouped.labels,
-grouped.values,
+
+categories.map(
+row =>
+row.partida
+),
+
+categories.map(
+row =>
+row.current
+),
+
 {
 plugins: {
 legend: {
-position: "bottom"
+position:
+"bottom"
 }
 }
 }
@@ -1851,50 +2567,17 @@ position: "bottom"
 
 
 /* =========================================================
-APROBADO VS VIGENTE
+PRESUPUESTADO VS REAL
 ========================================================= */
 
 function renderBudgetEvolution() {
 
-const groups = {};
-
-state.planOI.forEach(
-row => {
-
-if (!groups[row.partida]) {
-
-groups[row.partida] = {
-approved: 0,
-current: 0
-};
-
-}
-
-groups[
-row.partida
-].approved +=
-row.approved;
-
-groups[
-row.partida
-].current +=
-row.current;
-
-}
-);
-
-
-const entries =
-Object.entries(groups)
+const categories =
+state.planOI.categories
 .filter(
-([, values]) =>
-values.approved ||
-values.current
-)
-.sort(
-(a, b) =>
-b[1].current -
-a[1].current
+row =>
+row.approved !== 0 ||
+row.current !== 0
 )
 .slice(0, 15);
 
@@ -1902,19 +2585,22 @@ a[1].current
 createMultiChart(
 "budgetEvolutionChart",
 "bar",
-entries.map(
-x => x[0]
+
+categories.map(
+row =>
+row.partida
 ),
+
 [
 
 {
 label:
-"Aprobado",
+"Presupuestado USD",
 
 data:
-entries.map(
-x =>
-x[1].approved
+categories.map(
+row =>
+row.approved
 ),
 
 backgroundColor:
@@ -1923,12 +2609,12 @@ COLORS.blue
 
 {
 label:
-"Vigente",
+"Real USD",
 
 data:
-entries.map(
-x =>
-x[1].current
+categories.map(
+row =>
+row.current
 ),
 
 backgroundColor:
@@ -1936,50 +2622,32 @@ COLORS.cyan
 }
 
 ]
+
 );
 
 }
 
 
 /* =========================================================
-AHORRO POR PARTIDA
+DIFERENCIA / AHORRO
 ========================================================= */
 
 function renderSavingsByPart() {
 
-const groups = {};
-
-state.planOI.forEach(
-row => {
-
-const saving =
-row.savings ||
-(
-row.approved -
-row.current
-);
-
-groups[row.partida] =
-(
-groups[row.partida] ||
-0
-) +
-saving;
-
-}
-);
-
-
-const entries =
-Object.entries(groups)
+const categories =
+state.planOI.categories
 .filter(
-([, value]) =>
-value !== 0
+row =>
+row.savings !== 0
 )
 .sort(
 (a, b) =>
-Math.abs(b[1]) -
-Math.abs(a[1])
+Math.abs(
+b.savings
+) -
+Math.abs(
+a.savings
+)
 )
 .slice(0, 15);
 
@@ -1987,18 +2655,25 @@ Math.abs(a[1])
 createChart(
 "savingsByPartChart",
 "bar",
-entries.map(
-x => x[0]
+
+categories.map(
+row =>
+row.partida
 ),
-entries.map(
-x => x[1]
+
+categories.map(
+row =>
+row.savings
 ),
+
 {
-indexAxis: "y",
+indexAxis:
+"y",
 
 plugins: {
 legend: {
-display: false
+display:
+false
 }
 }
 }
@@ -2016,26 +2691,31 @@ function renderPurchaseStatus() {
 const withPO =
 state.budget.filter(
 row =>
-row.status ===
-"Con OC"
+row.hasPO
 ).length;
 
+
 const pending =
-state.budget.length -
-withPO;
+state.budget.filter(
+row =>
+!row.hasPO
+).length;
 
 
 createChart(
 "purchaseStatusChart",
 "doughnut",
+
 [
 "Con OC",
 "Pendiente"
 ],
+
 [
 withPO,
 pending
 ]
+
 );
 
 }
@@ -2052,39 +2732,49 @@ $("topSuppliers");
 
 if (!container) return;
 
+
 const groups = {};
 
 
 state.budget.forEach(
 row => {
 
-if (!row.supplier) {
+if (
+!row.supplier ||
+!row.netValueDOP
+) {
+
 return;
+
 }
 
-groups[row.supplier] =
+
+groups[
+row.supplier
+] =
 (
 groups[
 row.supplier
-] ||
-0
+] || 0
 ) +
-(
-row.netValue ||
-row.current
-);
+row.netValueDOP;
 
 }
 );
 
 
 const entries =
-Object.entries(groups)
+Object.entries(
+groups
+)
 .sort(
 (a, b) =>
 b[1] - a[1]
 )
-.slice(0, 6);
+.slice(
+0,
+6
+);
 
 
 container.innerHTML =
@@ -2108,7 +2798,9 @@ supplier
 </b>
 
 <span>
-${money(value)}
+${money(
+value
+)}
 </span>
 
 </div>
@@ -2149,13 +2841,14 @@ row =>
 const missingPO =
 state.budget.filter(
 row =>
-!row.po
+!row.hasPO
 ).length;
 
 
 const missingDate =
 state.budget.filter(
 row =>
+row.hasPO &&
 !row.date
 ).length;
 
@@ -2165,7 +2858,6 @@ const items = [
 {
 label:
 "Sin proveedor",
-
 value:
 missingSupplier
 },
@@ -2173,15 +2865,13 @@ missingSupplier
 {
 label:
 "Sin OC",
-
 value:
 missingPO
 },
 
 {
 label:
-"Sin fecha",
-
+"OC sin fecha",
 value:
 missingDate
 }
@@ -2214,7 +2904,7 @@ item.value /
 total
 )}
 
-de los ítems
+de los registros
 
 </small>
 
@@ -2227,7 +2917,7 @@ de los ítems
 
 
 /* =========================================================
-PRIORIDADES
+ATENCIÓN
 ========================================================= */
 
 function renderAttentionList() {
@@ -2242,15 +2932,18 @@ const pending =
 [...state.budget]
 .filter(
 row =>
-row.status !==
-"Con OC"
+!row.hasPO &&
+row.internalBudgetDOP > 0
 )
 .sort(
 (a, b) =>
-b.current -
-a.current
+b.internalBudgetDOP -
+a.internalBudgetDOP
 )
-.slice(0, 6);
+.slice(
+0,
+6
+);
 
 
 container.innerHTML =
@@ -2272,13 +2965,17 @@ row.item
 </b>
 
 <span>
+
 ${escapeHtml(
 row.partida
 )}
+
 ·
+
 ${money(
-row.current
+row.internalBudgetDOP
 )}
+
 </span>
 
 </div>
@@ -2324,20 +3021,42 @@ renderBudgetTable
 const reset =
 $("budgetReset");
 
+
 if (reset) {
 
 reset.addEventListener(
 "click",
 () => {
 
+if (
+$("budgetCategoryFilter")
+) {
+
 $("budgetCategoryFilter").value =
 "";
+
+}
+
+
+if (
+$("budgetStatusFilter")
+) {
 
 $("budgetStatusFilter").value =
 "";
 
+}
+
+
+if (
+$("budgetSupplierFilter")
+) {
+
 $("budgetSupplierFilter").value =
 "";
+
+}
+
 
 renderBudgetTable();
 
@@ -2356,6 +3075,7 @@ PRESUPUESTO Y COMPRAS
 function renderBudget() {
 
 populateBudgetFilters();
+
 renderBudgetTable();
 
 
@@ -2363,21 +3083,25 @@ const category =
 groupSum(
 state.budget,
 "partida",
-"current"
+"internalBudgetDOP"
 );
 
 
 createChart(
 "categoryChart",
 "bar",
+
 category.labels,
 category.values,
+
 {
-indexAxis: "y",
+indexAxis:
+"y",
 
 plugins: {
 legend: {
-display: false
+display:
+false
 }
 }
 }
@@ -2391,12 +3115,15 @@ groupSupplierValue();
 createChart(
 "supplierChart",
 "bar",
+
 supplier.labels,
 supplier.values,
+
 {
 plugins: {
 legend: {
-display: false
+display:
+false
 }
 }
 }
@@ -2409,6 +3136,7 @@ function populateBudgetFilters() {
 
 fillSelect(
 "budgetCategoryFilter",
+
 unique(
 state.budget.map(
 row =>
@@ -2420,6 +3148,7 @@ row.partida
 
 fillSelect(
 "budgetSupplierFilter",
+
 unique(
 state.budget
 .map(
@@ -2517,9 +3246,11 @@ const category =
 $("budgetCategoryFilter")
 ?.value || "";
 
+
 const status =
 $("budgetStatusFilter")
 ?.value || "";
+
 
 const supplier =
 $("budgetSupplierFilter")
@@ -2557,14 +3288,14 @@ supplier
 if (status) {
 
 if (
-status ===
-"Sin OC definida"
+normalizeText(status) ===
+"sinocdefinida"
 ) {
 
 rows =
 rows.filter(
 row =>
-!row.po
+!row.hasPO
 );
 
 } else {
@@ -2572,8 +3303,12 @@ row =>
 rows =
 rows.filter(
 row =>
-row.status ===
+normalizeText(
+row.status
+) ===
+normalizeText(
 status
+)
 );
 
 }
@@ -2585,7 +3320,7 @@ const budget =
 sum(
 rows.map(
 row =>
-row.current
+row.internalBudgetDOP
 )
 );
 
@@ -2595,11 +3330,11 @@ sum(
 rows
 .filter(
 row =>
-row.po
+row.hasPO
 )
 .map(
 row =>
-row.netValue
+row.netValueDOP
 )
 );
 
@@ -2609,10 +3344,12 @@ setText(
 money(budget)
 );
 
+
 setText(
 "budgetFilteredOrdered",
 money(ordered)
 );
+
 
 setText(
 "budgetFilteredPending",
@@ -2625,10 +3362,12 @@ ordered,
 )
 );
 
+
 setText(
 "budgetFilteredItems",
 rows.length
 );
+
 
 setText(
 "budgetTableCount",
@@ -2670,18 +3409,17 @@ row.supplier ||
 <td>
 
 <span class="status-pill ${
-row.status ===
-"Con OC"
+row.hasPO
 ? "good"
-: row.status ===
-"Sin proveedor"
-? "bad"
-: "warn"
+: row.supplier
+? "warn"
+: "bad"
 }">
 
 ${escapeHtml(
-row.po ||
-row.status
+row.hasPO
+? row.po
+: row.status
 )}
 
 </span>
@@ -2698,7 +3436,7 @@ row.date
 
 <td class="num money">
 ${money(
-row.current
+row.internalBudgetDOP
 )}
 </td>
 
@@ -2722,11 +3460,30 @@ FLUJO DE CAJA
 
 function renderCashflow() {
 
-const payments =
-extractPayments();
+/*
+Fuente principal:
+hoja Flujo de Caja.
+
+Si por alguna razón esa hoja no
+trae datos, usamos los pagos de
+BD Plan Detallado como respaldo.
+*/
+
+let payments =
+[...state.cashflow];
+
+
+if (!payments.length) {
+
+payments =
+extractPaymentsFromBD();
+
+}
+
 
 state.cashflowPayments =
 payments;
+
 
 renderCashflowKPIs(
 payments
@@ -2750,271 +3507,93 @@ renderOverviewPaymentReminders();
 
 
 /* =========================================================
-EXTRAER PAGOS DE BD PLAN DETALLADO
+PAGOS DESDE BD
 ========================================================= */
 
-function extractPayments() {
+function extractPaymentsFromBD() {
 
-const payments = [];
+const result = [];
 
 
 state.budget.forEach(
 row => {
 
-const raw =
-row.raw || {};
+row.payments.forEach(
+payment => {
 
-
-/*
-Soporta Pago 1 hasta Pago 10
-por si en el futuro la plantilla
-crece.
-*/
-
-for (
-let i = 1;
-i <= 10;
-i++
+if (
+!payment.amount
 ) {
 
-const period =
-valueFrom(
-raw,
-[
-`Per.P${i}`,
-`Per P${i}`,
-`Periodo ${i}`,
-`Período ${i}`,
-`Fecha Pago ${i}`
-]
-);
+return;
 
-
-const amount =
-numberFrom(
-raw,
-[
-`Pago ${i}`,
-`Pago${i}`,
-`Payment ${i}`
-]
-);
-
-
-if (!amount) {
-continue;
 }
 
 
-const date =
-parsePaymentPeriod(
-period
+/*
+En BD los pagos que vimos
+corresponden a valores
+monetarios de la plantilla.
+
+Convertimos a DOP cuando
+la moneda es USD.
+*/
+
+const dop =
+convertToDOP(
+payment.amount,
+row.currency,
+row.rate
 );
 
 
-const currency =
-row.currency ||
-"DOP";
-
-
-payments.push({
-
-date,
-
-period,
-
-amount,
-
-currency,
-
-dop:
-convertToDOP(
-amount,
-currency,
-row.rate
-),
-
-item:
-row.item,
+result.push({
 
 partida:
 row.partida,
 
+item:
+row.item,
+
 supplier:
 row.supplier,
 
+period:
+payment.period,
+
+date:
+payment.date,
+
+amount:
+payment.amount,
+
+dop,
+
+currency:
+row.currency,
+
 paymentNumber:
-i
+payment.number
 
 });
 
 }
+);
 
 }
 );
 
 
-return payments.sort(
-(a, b) =>
-dateNumber(a.date) -
-dateNumber(b.date)
-);
+return result;
 
 }
 
 
 /* =========================================================
-INTERPRETAR PERÍODOS DE PAGO
+FLUJO KPIs
 ========================================================= */
 
-function parsePaymentPeriod(
-value
-) {
-
-if (!value) {
-return null;
-}
-
-
-const direct =
-parseExcelDate(
-value
-);
-
-if (direct) {
-return direct;
-}
-
-
-const text =
-String(value)
-.trim()
-.toLowerCase();
-
-
-const months = {
-
-ene: 0,
-enero: 0,
-
-feb: 1,
-febrero: 1,
-
-mar: 2,
-marzo: 2,
-
-abr: 3,
-abril: 3,
-
-may: 4,
-mayo: 4,
-
-jun: 5,
-junio: 5,
-
-jul: 6,
-julio: 6,
-
-ago: 7,
-agosto: 7,
-
-sep: 8,
-sept: 8,
-septiembre: 8,
-
-oct: 9,
-octubre: 9,
-
-nov: 10,
-noviembre: 10,
-
-dic: 11,
-diciembre: 11
-
-};
-
-
-for (
-const [name, month]
-of Object.entries(months)
-) {
-
-if (
-text.includes(name)
-) {
-
-const yearMatch =
-text.match(
-/20\d{2}/
-);
-
-const year =
-yearMatch
-? Number(
-yearMatch[0]
-)
-: new Date()
-.getFullYear();
-
-return new Date(
-year,
-month,
-1
-);
-
-}
-
-}
-
-
-return null;
-
-}
-
-
-/* =========================================================
-CONVERSIÓN A DOP
-========================================================= */
-
-function convertToDOP(
-amount,
-currency,
-rowRate
-) {
-
-const c =
-normalizeText(
-currency
-);
-
-
-if (
-c.includes("usd") ||
-c.includes("dolar")
-) {
-
-const rate =
-rowRate ||
-state.exchangeRate;
-
-return amount *
-rate;
-
-}
-
-
-return amount;
-
-}
-
-
-/* =========================================================
-KPI FLUJO DE CAJA
-========================================================= */
-
-function renderCashflowKPIs(
-payments
-) {
+function renderCashflowKPIs(payments) {
 
 const now =
 startOfToday();
@@ -3024,7 +3603,9 @@ const total =
 sum(
 payments.map(
 payment =>
-payment.dop
+getPaymentDOP(
+payment
+)
 )
 );
 
@@ -3040,7 +3621,9 @@ now
 )
 .map(
 payment =>
-payment.dop
+getPaymentDOP(
+payment
+)
 )
 );
 
@@ -3070,15 +3653,19 @@ a[1].amount
 )[0];
 
 
-const next =
-entries.find(
-([, value]) =>
-value.date >=
+const currentMonth =
 new Date(
 now.getFullYear(),
 now.getMonth(),
 1
-)
+);
+
+
+const next =
+entries.find(
+([, value]) =>
+value.date >=
+currentMonth
 );
 
 
@@ -3104,7 +3691,9 @@ ninety
 )
 .map(
 payment =>
-payment.dop
+getPaymentDOP(
+payment
+)
 )
 );
 
@@ -3114,10 +3703,12 @@ setText(
 money(total)
 );
 
+
 setText(
 "cfPaidToDate",
 money(past)
 );
+
 
 setText(
 "cfPeakMonth",
@@ -3125,6 +3716,7 @@ peak
 ? peak[0]
 : "—"
 );
+
 
 setText(
 "cfPeakAmount",
@@ -3135,12 +3727,14 @@ peak[1].amount
 : "—"
 );
 
+
 setText(
 "cfNextMonth",
 next
 ? next[0]
 : "—"
 );
+
 
 setText(
 "cfNextAmount",
@@ -3150,6 +3744,7 @@ next[1].amount
 )
 : "—"
 );
+
 
 setText(
 "cf90Days",
@@ -3165,12 +3760,10 @@ entries
 
 
 /* =========================================================
-RECORDATORIOS DE PAGO
+RECORDATORIOS
 ========================================================= */
 
-function renderPaymentReminders(
-payments
-) {
+function renderPaymentReminders(payments) {
 
 const container =
 $("paymentReminderList");
@@ -3214,7 +3807,10 @@ payment.days >=
 a.days -
 b.days
 )
-.slice(0, 8);
+.slice(
+0,
+8
+);
 
 
 container.innerHTML =
@@ -3225,8 +3821,7 @@ payment => {
 let cls =
 "upcoming";
 
-let label =
-"";
+let label;
 
 
 if (
@@ -3240,6 +3835,16 @@ label =
 `${Math.abs(
 payment.days
 )} días vencido`;
+
+} else if (
+payment.days === 0
+) {
+
+cls =
+"current";
+
+label =
+"Este mes";
 
 } else if (
 payment.days <= 30
@@ -3273,24 +3878,28 @@ label
 
 <h3>
 ${escapeHtml(
-payment.item
+payment.item ||
+payment.partida ||
+"Flujo programado"
 )}
 </h3>
 
 <b>
-${formatOriginalMoney(
-payment.amount,
-payment.currency
+${money(
+getPaymentDOP(
+payment
+)
 )}
 </b>
 
 <p>
+
 ${escapeHtml(
 payment.supplier ||
-"Sin proveedor"
+payment.partida ||
+""
 )}
-· Pago
-${payment.paymentNumber}
+
 </p>
 
 </div>
@@ -3300,7 +3909,7 @@ ${payment.paymentNumber}
 }
 ).join("")
 : emptyMessage(
-"No hay pagos programados."
+"No hay pagos próximos identificados."
 );
 
 }
@@ -3340,7 +3949,10 @@ now
 a.date -
 b.date
 )
-.slice(0, 4);
+.slice(
+0,
+4
+);
 
 
 container.innerHTML =
@@ -3369,20 +3981,24 @@ days <= 30
 <span>
 ${
 days === 0
-? "Hoy"
+? "Este mes"
 : `En ${days} días`
 }
 </span>
 
 <b>
 ${money(
-payment.dop
+getPaymentDOP(
+payment
+)
 )}
 </b>
 
 <small>
 ${escapeHtml(
-payment.item
+payment.item ||
+payment.partida ||
+"Pago programado"
 )}
 </small>
 
@@ -3400,12 +4016,10 @@ payment.item
 
 
 /* =========================================================
-GRÁFICAS FLUJO DE CAJA
+GRÁFICAS FLUJO
 ========================================================= */
 
-function renderCashflowCharts(
-payments
-) {
+function renderCashflowCharts(payments) {
 
 const monthly =
 groupPaymentsByMonth(
@@ -3445,7 +4059,8 @@ values,
 {
 plugins: {
 legend: {
-display: false
+display:
+false
 }
 }
 }
@@ -3456,18 +4071,20 @@ const now =
 startOfToday();
 
 
-const paid =
+const past =
 sum(
 payments
 .filter(
-p =>
-p.date &&
-p.date <
+payment =>
+payment.date &&
+payment.date <
 now
 )
 .map(
-p =>
-p.dop
+payment =>
+getPaymentDOP(
+payment
+)
 )
 );
 
@@ -3476,14 +4093,16 @@ const future =
 sum(
 payments
 .filter(
-p =>
-!p.date ||
-p.date >=
+payment =>
+!payment.date ||
+payment.date >=
 now
 )
 .map(
-p =>
-p.dop
+payment =>
+getPaymentDOP(
+payment
+)
 )
 );
 
@@ -3491,53 +4110,23 @@ p.dop
 createChart(
 "cashflowStatusChart",
 "doughnut",
+
 [
-"Calendario anterior",
+"Períodos anteriores",
 "Por venir"
 ],
+
 [
-paid,
+past,
 future
 ]
+
 );
 
 
-const currencyGroups = {};
-
-
-payments.forEach(
-payment => {
-
-const currency =
-payment.currency ||
-"DOP";
-
-currencyGroups[
-currency
-] =
-(
-currencyGroups[
-currency
-] ||
-0
-) +
-payment.dop;
-
-}
-);
-
-
-createChart(
-"cashflowCurrencyChart",
-"doughnut",
-Object.keys(
-currencyGroups
-),
-Object.values(
-currencyGroups
-)
-);
-
+/*
+Acumulado
+*/
 
 let cumulative = 0;
 
@@ -3563,22 +4152,64 @@ cumulativeValues,
 {
 plugins: {
 legend: {
-display: false
+display:
+false
 }
 }
 }
+);
+
+
+/*
+Por año
+*/
+
+const years = {};
+
+
+payments.forEach(
+payment => {
+
+if (!payment.date) {
+return;
+}
+
+
+const year =
+String(
+payment.date
+.getFullYear()
+);
+
+
+years[year] =
+(
+years[year] ||
+0
+) +
+getPaymentDOP(
+payment
+);
+
+}
+);
+
+
+createChart(
+"cashflowCurrencyChart",
+"doughnut",
+Object.keys(years),
+Object.values(years)
 );
 
 }
 
 
 /* =========================================================
-AGRUPAR PAGOS POR MES
+AGRUPAR FLUJO POR MES
 ========================================================= */
 
-function groupPaymentsByMonth(
-payments
-) {
+function groupPaymentsByMonth(payments) {
 
 const groups = {};
 
@@ -3603,7 +4234,22 @@ payment.date
 );
 
 
-const label =
+const key =
+`${date.getFullYear()}-${String(
+date.getMonth() + 1
+).padStart(2, "0")}`;
+
+
+if (!groups[key]) {
+
+groups[key] = {
+
+amount:
+0,
+
+date,
+
+label:
 date.toLocaleDateString(
 "es-DO",
 {
@@ -3613,27 +4259,43 @@ month:
 year:
 "numeric"
 }
-);
+)
 
-
-if (!groups[label]) {
-
-groups[label] = {
-amount: 0,
-date
 };
 
 }
 
 
-groups[label].amount +=
-payment.dop;
+groups[key].amount +=
+getPaymentDOP(
+payment
+);
 
 }
 );
 
 
-return groups;
+const output = {};
+
+
+Object.values(groups)
+.sort(
+(a, b) =>
+a.date -
+b.date
+)
+.forEach(
+value => {
+
+output[
+value.label
+] = value;
+
+}
+);
+
+
+return output;
 
 }
 
@@ -3642,9 +4304,7 @@ return groups;
 PRÓXIMOS MESES
 ========================================================= */
 
-function renderUpcomingMonths(
-entries
-) {
+function renderUpcomingMonths(entries) {
 
 const container =
 $("cashflowUpcomingMonths");
@@ -3671,7 +4331,10 @@ entries
 value.date >=
 currentMonth
 )
-.slice(0, 6);
+.slice(
+0,
+6
+);
 
 
 const max =
@@ -3728,7 +4391,7 @@ value.amount
 </b>
 
 <small>
-Equiv. DOP
+Flujo programado
 </small>
 
 </div>
@@ -3748,9 +4411,7 @@ Equiv. DOP
 TABLA DE PAGOS
 ========================================================= */
 
-function renderPaymentTable(
-payments
-) {
+function renderPaymentTable(payments) {
 
 const tbody =
 $("paymentTable");
@@ -3758,72 +4419,38 @@ $("paymentTable");
 if (!tbody) return;
 
 
-const now =
-startOfToday();
-
-
 setText(
 "paymentTableCount",
-`${payments.length} pagos`
+`${payments.length} movimientos`
 );
+
+
+const now =
+startOfToday();
 
 
 tbody.innerHTML =
 payments.map(
 payment => {
 
-const days =
-payment.date
-? Math.ceil(
-(
-payment.date -
-now
-) /
-86400000
-)
-: null;
-
-
 let status =
-"Sin fecha";
+"Programado";
 
 let cls =
-"info";
-
-
-if (
-days !== null
-) {
-
-if (
-days < 0
-) {
-
-status =
-"Fecha anterior";
-
-cls =
-"bad";
-
-} else if (
-days <= 30
-) {
-
-status =
-"Próximo";
-
-cls =
-"warn";
-
-} else {
-
-status =
-"Futuro";
-
-cls =
 "good";
 
-}
+
+if (
+payment.date &&
+payment.date <
+now
+) {
+
+status =
+"Período anterior";
+
+cls =
+"info";
 
 }
 
@@ -3838,8 +4465,10 @@ payment.date
 ? monthYear(
 payment.date
 )
-: payment.period ||
-"—"
+: `P${
+payment.period ||
+""
+}`
 )}
 </td>
 
@@ -3853,6 +4482,7 @@ payment.partida ||
 <td>
 ${escapeHtml(
 payment.item ||
+payment.partida ||
 "—"
 )}
 </td>
@@ -3865,26 +4495,33 @@ payment.supplier ||
 </td>
 
 <td>
-Pago
-${payment.paymentNumber}
+${
+payment.paymentNumber
+? `Pago ${payment.paymentNumber}`
+: `P${payment.period || ""}`
+}
 </td>
 
 <td>
 ${escapeHtml(
-payment.currency
+payment.currency ||
+"DOP"
 )}
 </td>
 
 <td class="num">
-${formatOriginalMoney(
-payment.amount,
-payment.currency
+${money(
+getPaymentDOP(
+payment
+)
 )}
 </td>
 
 <td class="num money">
 ${money(
-payment.dop
+getPaymentDOP(
+payment
+)
 )}
 </td>
 
@@ -3907,7 +4544,75 @@ ${status}
 
 
 /* =========================================================
-SELECTOR MONEDA
+OBTENER MONTO DOP
+========================================================= */
+
+function getPaymentDOP(payment) {
+
+if (
+Number.isFinite(
+Number(
+payment.dop
+)
+)
+) {
+
+return Number(
+payment.dop
+);
+
+}
+
+
+return Number(
+payment.amount
+) || 0;
+
+}
+
+
+/* =========================================================
+CONVERSIÓN DOP
+========================================================= */
+
+function convertToDOP(
+amount,
+currency,
+rowRate
+) {
+
+const c =
+normalizeText(
+currency
+);
+
+
+if (
+c.includes("usd") ||
+c.includes("dolar")
+) {
+
+const rate =
+Number(rowRate) ||
+state.exchangeRate;
+
+return (
+Number(amount) ||
+0
+) * rate;
+
+}
+
+
+return Number(
+amount
+) || 0;
+
+}
+
+
+/* =========================================================
+SELECTOR DE MONEDA
 ========================================================= */
 
 function setupCashflowCurrency() {
@@ -3935,16 +4640,14 @@ function renderTracking() {
 const withPO =
 state.budget.filter(
 row =>
-row.status ===
-"Con OC"
+row.hasPO
 );
 
 
 const pending =
 state.budget.filter(
 row =>
-row.status !==
-"Con OC"
+!row.hasPO
 );
 
 
@@ -3958,6 +4661,7 @@ row =>
 const noDate =
 state.budget.filter(
 row =>
+row.hasPO &&
 !row.date
 );
 
@@ -3967,15 +4671,18 @@ setText(
 withPO.length
 );
 
+
 setText(
 "trackPending",
 pending.length
 );
 
+
 setText(
 "trackNoSupplier",
 noSupplier.length
 );
+
 
 setText(
 "trackNoDate",
@@ -3995,9 +4702,11 @@ renderBottlenecks(
 pending
 );
 
+
 renderSupplierPO(
 withPO
 );
+
 
 renderTrackingTable(
 pending
@@ -4037,7 +4746,7 @@ value:
 total,
 
 detail:
-"Ítems identificados"
+"Registros identificados"
 },
 
 {
@@ -4060,7 +4769,7 @@ value:
 withPO,
 
 detail:
-"Con OC"
+"OC válida"
 },
 
 {
@@ -4071,7 +4780,7 @@ value:
 pending,
 
 detail:
-`${noDate} sin fecha`
+`${noDate} OC sin fecha`
 }
 
 ];
@@ -4107,37 +4816,47 @@ ${stage.detail}
 CUELLOS DE BOTELLA
 ========================================================= */
 
-function renderBottlenecks(
-pending
-) {
+function renderBottlenecks(pending) {
 
 const top =
 [...pending]
+.filter(
+row =>
+row.internalBudgetDOP > 0
+)
 .sort(
 (a, b) =>
-b.current -
-a.current
+b.internalBudgetDOP -
+a.internalBudgetDOP
 )
-.slice(0, 10);
+.slice(
+0,
+10
+);
 
 
 createChart(
 "bottleneckChart",
 "bar",
+
 top.map(
 row =>
 row.item
 ),
+
 top.map(
 row =>
-row.current
+row.internalBudgetDOP
 ),
+
 {
-indexAxis: "y",
+indexAxis:
+"y",
 
 plugins: {
 legend: {
-display: false
+display:
+false
 }
 }
 }
@@ -4150,9 +4869,7 @@ display: false
 OC POR PROVEEDOR
 ========================================================= */
 
-function renderSupplierPO(
-withPO
-) {
+function renderSupplierPO(withPO) {
 
 const groups = {};
 
@@ -4164,11 +4881,10 @@ const supplier =
 row.supplier ||
 "Sin proveedor";
 
+
 groups[supplier] =
 (
-groups[
-supplier
-] ||
+groups[supplier] ||
 0
 ) + 1;
 
@@ -4182,22 +4898,31 @@ Object.entries(groups)
 (a, b) =>
 b[1] - a[1]
 )
-.slice(0, 10);
+.slice(
+0,
+10
+);
 
 
 createChart(
 "supplierPOChart",
 "bar",
+
 entries.map(
-x => x[0]
+item =>
+item[0]
 ),
+
 entries.map(
-x => x[1]
+item =>
+item[1]
 ),
+
 {
 plugins: {
 legend: {
-display: false
+display:
+false
 }
 }
 }
@@ -4210,9 +4935,7 @@ display: false
 TABLA SEGUIMIENTO
 ========================================================= */
 
-function renderTrackingTable(
-pending
-) {
+function renderTrackingTable(pending) {
 
 const tbody =
 $("trackingTable");
@@ -4227,11 +4950,11 @@ setText(
 
 
 tbody.innerHTML =
-pending
+[...pending]
 .sort(
 (a, b) =>
-b.current -
-a.current
+b.internalBudgetDOP -
+a.internalBudgetDOP
 )
 .map(
 row => `
@@ -4276,13 +4999,14 @@ row.status
 <td>
 ${escapeHtml(
 row.comment ||
+row.observation ||
 "—"
 )}
 </td>
 
 <td class="num money">
 ${money(
-row.current
+row.internalBudgetDOP
 )}
 </td>
 
@@ -4298,18 +5022,35 @@ row.current
 PENDIENTES
 ========================================================= */
 
+function getOpenIssuesCount() {
+
+if (
+state.issues.length
+) {
+
+return state.issues.length;
+
+}
+
+
+return state.budget.filter(
+row =>
+!row.hasPO &&
+(
+row.comment ||
+row.observation
+)
+).length;
+
+}
+
+
 function renderPending() {
 
-/*
-Si existe hoja Pendientes,
-usamos esa.
-
-Si no existe, generamos pendientes
-desde BD Plan Detallado.
-*/
-
 let issues =
-[...state.issues];
+normalizeIssues(
+state.issues
+);
 
 
 if (!issues.length) {
@@ -4318,9 +5059,11 @@ issues =
 state.budget
 .filter(
 row =>
-row.comment &&
-row.status !==
-"Con OC"
+!row.hasPO &&
+(
+row.comment ||
+row.observation
+)
 )
 .map(
 row => ({
@@ -4333,7 +5076,8 @@ row.supplier ||
 "Sin responsable",
 
 comment:
-row.comment,
+row.comment ||
+row.observation,
 
 status:
 row.status
@@ -4365,15 +5109,18 @@ setText(
 issues.length
 );
 
+
 setText(
 "pendingOwners",
 owners.length
 );
 
+
 setText(
 "pendingComments",
 withComments.length
 );
+
 
 setText(
 "pendingNoComments",
@@ -4386,10 +5133,70 @@ renderOwnerChart(
 issues
 );
 
+
 renderConsiderations();
+
 
 renderIssueBoard(
 issues
+);
+
+}
+
+
+function normalizeIssues(rows) {
+
+return rows.map(
+(row, index) => ({
+
+title:
+valueFrom(
+row,
+[
+"Pendiente",
+"Tema",
+"Issue",
+"Actividad",
+"Descripción",
+"Descripcion"
+]
+) ||
+`Pendiente ${index + 1}`,
+
+owner:
+valueFrom(
+row,
+[
+"Responsable",
+"Owner",
+"Líder",
+"Lider"
+]
+) ||
+"Sin responsable",
+
+comment:
+valueFrom(
+row,
+[
+"Comentario",
+"Comentarios",
+"Observación",
+"Observacion"
+]
+) || "",
+
+status:
+valueFrom(
+row,
+[
+"Estado",
+"Status"
+]
+) ||
+"Abierto"
+
+})
 );
 
 }
@@ -4399,9 +5206,7 @@ issues
 RESPONSABLES
 ========================================================= */
 
-function renderOwnerChart(
-issues
-) {
+function renderOwnerChart(issues) {
 
 const groups = {};
 
@@ -4415,8 +5220,7 @@ issue.owner
 (
 groups[
 issue.owner
-] ||
-0
+] || 0
 ) + 1;
 
 }
@@ -4424,7 +5228,9 @@ issue.owner
 
 
 const entries =
-Object.entries(groups)
+Object.entries(
+groups
+)
 .sort(
 (a, b) =>
 b[1] - a[1]
@@ -4434,16 +5240,22 @@ b[1] - a[1]
 createChart(
 "ownerChart",
 "bar",
+
 entries.map(
-x => x[0]
+item =>
+item[0]
 ),
+
 entries.map(
-x => x[1]
+item =>
+item[1]
 ),
+
 {
 plugins: {
 legend: {
-display: false
+display:
+false
 }
 }
 }
@@ -4488,13 +5300,13 @@ items = [
 
 "Validar fechas de entrega de partidas críticas.",
 
-"Confirmar proveedor y orden de compra antes del corte.",
+"Confirmar proveedores de compras pendientes.",
 
-"Actualizar comentarios de pendientes abiertos.",
+"Actualizar comentarios de los registros abiertos.",
 
-"Revisar pagos próximos contra el flujo de caja.",
+"Revisar el flujo de caja contra los períodos P1, P2, P3 y siguientes.",
 
-"Mantener BD Plan Detallado y Plan OI actualizados."
+"Mantener Plan OI y BD Plan Detallado actualizados."
 
 ];
 
@@ -4503,7 +5315,10 @@ items = [
 
 container.innerHTML =
 items
-.slice(0, 8)
+.slice(
+0,
+8
+)
 .map(
 item => `
 
@@ -4522,12 +5337,10 @@ item
 
 
 /* =========================================================
-TARJETAS PENDIENTES
+TABLERO DE PENDIENTES
 ========================================================= */
 
-function renderIssueBoard(
-issues
-) {
+function renderIssueBoard(issues) {
 
 const container =
 $("issueBoard");
@@ -4568,10 +5381,7 @@ issue.comment ||
 : `
 
 <section class="card">
-
-No hay pendientes
-registrados.
-
+No hay pendientes registrados.
 </section>
 
 `;
@@ -4596,6 +5406,7 @@ id => {
 
 const input =
 $(id);
+
 
 if (input) {
 
@@ -4626,11 +5437,13 @@ numberInput(
 10000
 );
 
+
 const exw =
 numberInput(
 "liqExw",
 0
 );
+
 
 const fob =
 numberInput(
@@ -4638,11 +5451,13 @@ numberInput(
 1000
 );
 
+
 const containers =
 numberInput(
 "liqContainers",
 1
 );
+
 
 const rate =
 numberInput(
@@ -4897,11 +5712,13 @@ ${usd(total)}
 </b>
 
 <small>
+
 ≈
 ${money(
 total *
 rate
 )}
+
 </small>
 
 </div>
@@ -4928,8 +5745,13 @@ const groups = {};
 state.budget.forEach(
 row => {
 
-if (!row.supplier) {
+if (
+!row.supplier ||
+!row.netValueDOP
+) {
+
 return;
+
 }
 
 
@@ -4939,37 +5761,40 @@ row.supplier
 (
 groups[
 row.supplier
-] ||
-0
+] || 0
 ) +
-(
-row.netValue ||
-row.current
-);
+row.netValueDOP;
 
 }
 );
 
 
 const entries =
-Object.entries(groups)
+Object.entries(
+groups
+)
 .sort(
 (a, b) =>
 b[1] - a[1]
 )
-.slice(0, 12);
+.slice(
+0,
+12
+);
 
 
 return {
 
 labels:
 entries.map(
-x => x[0]
+item =>
+item[0]
 ),
 
 values:
 entries.map(
-x => x[1]
+item =>
+item[1]
 )
 
 };
@@ -5012,7 +5837,9 @@ value;
 
 
 const entries =
-Object.entries(groups)
+Object.entries(
+groups
+)
 .filter(
 ([, value]) =>
 value !== 0
@@ -5027,12 +5854,14 @@ return {
 
 labels:
 entries.map(
-x => x[0]
+item =>
+item[0]
 ),
 
 values:
 entries.map(
-x => x[1]
+item =>
+item[1]
 )
 
 };
@@ -5172,9 +6001,7 @@ options
 }
 
 
-function mergeChartOptions(
-custom
-) {
+function mergeChartOptions(custom) {
 
 const base = {
 
@@ -5212,55 +6039,6 @@ size: 10
 
 }
 
-},
-
-tooltip: {
-
-callbacks: {
-
-label(context) {
-
-const value =
-Number(
-context.raw
-);
-
-
-if (
-Number.isFinite(
-value
-) &&
-Math.abs(value) >=
-1000
-) {
-
-return (
-(
-context.dataset
-.label ||
-""
-) +
-" " +
-money(value)
-);
-
-}
-
-
-return (
-(
-context.dataset
-.label ||
-""
-) +
-" " +
-value
-);
-
-}
-
-}
-
 }
 
 },
@@ -5284,7 +6062,8 @@ minRotation:
 },
 
 grid: {
-display: false
+display:
+false
 }
 
 },
@@ -5309,6 +6088,34 @@ color:
 }
 
 };
+
+
+/*
+Doughnut no necesita escalas.
+*/
+
+if (
+custom &&
+custom.scales ===
+false
+) {
+
+delete base.scales;
+
+}
+
+
+if (
+custom &&
+custom.plugins
+) {
+
+base.plugins = {
+...base.plugins,
+...custom.plugins
+};
+
+}
 
 
 return deepMerge(
@@ -5375,9 +6182,7 @@ state.charts[id]
 state.charts[id]
 .destroy();
 
-delete state.charts[
-id
-];
+delete state.charts[id];
 
 }
 
@@ -5388,13 +6193,7 @@ id
 COUNTDOWN
 ========================================================= */
 
-let countdownInterval =
-null;
-
-
-function startCountdown(
-dateString
-) {
+function startCountdown(dateString) {
 
 if (
 countdownInterval
@@ -5408,7 +6207,7 @@ countdownInterval
 
 
 const target =
-parseDate(
+parseProjectDate(
 dateString
 );
 
@@ -5437,6 +6236,7 @@ diff <= 0
 
 diff = 0;
 
+
 if (status) {
 
 status.textContent =
@@ -5444,9 +6244,7 @@ status.textContent =
 
 }
 
-} else if (
-status
-) {
+} else if (status) {
 
 status.textContent =
 "Hacia la apertura";
@@ -5496,6 +6294,7 @@ setText(
 days
 );
 
+
 setText(
 "cdHours",
 String(hours)
@@ -5505,6 +6304,7 @@ String(hours)
 )
 );
 
+
 setText(
 "cdMinutes",
 String(minutes)
@@ -5513,6 +6313,7 @@ String(minutes)
 "0"
 )
 );
+
 
 setText(
 "cdSeconds",
@@ -5539,146 +6340,235 @@ update,
 
 
 /* =========================================================
-ESTADO VACÍO
+FECHAS
 ========================================================= */
 
-function renderEmptyState() {
+function parseProjectDate(value) {
 
-setText(
-"overviewSubtitle",
-"No fue posible cargar la plantilla de esta iniciativa."
+if (!value) {
+return null;
+}
+
+
+const date =
+new Date(
+`${value}T00:00:00`
 );
 
 
-[
-"kpiApprovedBudget",
-"kpiBudget",
-"kpiOrdered",
-"kpiPendingBuy",
-"kpiWeightedProgress",
-"kpiOpenIssues",
-"overviewDiscount",
-"overviewDiscountPct"
-].forEach(
-id =>
-setText(
-id,
+return isNaN(date)
+? null
+: date;
+
+}
+
+
+function parseExcelDate(value) {
+
+if (!value) {
+return null;
+}
+
+
+if (
+value instanceof Date &&
+!isNaN(value)
+) {
+
+return value;
+
+}
+
+
+if (
+typeof value ===
+"number"
+) {
+
+const parsed =
+XLSX.SSF
+.parse_date_code(
+value
+);
+
+
+if (parsed) {
+
+return new Date(
+parsed.y,
+parsed.m - 1,
+parsed.d
+);
+
+}
+
+}
+
+
+const text =
+String(value)
+.trim();
+
+
+if (!text) {
+return null;
+}
+
+
+const match =
+text.match(
+/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/
+);
+
+
+if (match) {
+
+let year =
+Number(
+match[3]
+);
+
+
+if (
+year < 100
+) {
+
+year += 2000;
+
+}
+
+
+return new Date(
+year,
+Number(
+match[2]
+) - 1,
+Number(
+match[1]
+)
+);
+
+}
+
+
+const direct =
+new Date(text);
+
+
+return isNaN(direct)
+? null
+: direct;
+
+}
+
+
+function startOfToday() {
+
+const now =
+new Date();
+
+
+return new Date(
+now.getFullYear(),
+now.getMonth(),
+now.getDate()
+);
+
+}
+
+
+function formatDate(date) {
+
+if (!date) {
+return "—";
+}
+
+
+return date
+.toLocaleDateString(
+"es-DO",
+{
+day:
+"2-digit",
+
+month:
+"short",
+
+year:
+"numeric"
+}
+);
+
+}
+
+
+function formatLongDate(date) {
+
+if (!date) {
+return "—";
+}
+
+
+return date
+.toLocaleDateString(
+"es-DO",
+{
+day:
+"numeric",
+
+month:
+"long",
+
+year:
+"numeric"
+}
+);
+
+}
+
+
+function formatPossibleDate(value) {
+
+const date =
+parseExcelDate(
+value
+);
+
+
+return date
+? formatDate(date)
+: String(
+value ||
 "—"
-)
+);
+
+}
+
+
+function monthYear(date) {
+
+if (!date) {
+return "—";
+}
+
+
+return date
+.toLocaleDateString(
+"es-DO",
+{
+month:
+"short",
+
+year:
+"numeric"
+}
 );
 
 }
 
 
 /* =========================================================
-UTILIDADES DE COLUMNAS
-========================================================= */
-
-function valueFrom(
-row,
-candidates
-) {
-
-const keys =
-Object.keys(row);
-
-
-for (
-const candidate
-of candidates
-) {
-
-const exact =
-keys.find(
-key =>
-normalizeText(key) ===
-normalizeText(
-candidate
-)
-);
-
-
-if (
-exact &&
-row[exact] !==
-undefined &&
-row[exact] !==
-null &&
-String(
-row[exact]
-).trim() !==
-""
-) {
-
-return row[
-exact
-];
-
-}
-
-}
-
-
-for (
-const candidate
-of candidates
-) {
-
-const partial =
-keys.find(
-key =>
-normalizeText(key)
-.includes(
-normalizeText(
-candidate
-)
-)
-);
-
-
-if (
-partial &&
-row[partial] !==
-undefined &&
-row[partial] !==
-null &&
-String(
-row[partial]
-).trim() !==
-""
-) {
-
-return row[
-partial
-];
-
-}
-
-}
-
-
-return "";
-
-}
-
-
-function numberFrom(
-row,
-candidates
-) {
-
-return toNumber(
-valueFrom(
-row,
-candidates
-)
-);
-
-}
-
-
-/* =========================================================
-CONVERSIÓN DE NÚMEROS
+NÚMEROS
 ========================================================= */
 
 function toNumber(value) {
@@ -5699,14 +6589,47 @@ typeof value ===
 "number"
 ) {
 
-return value;
+return Number.isFinite(
+value
+)
+? value
+: 0;
 
 }
 
 
 let text =
 String(value)
-.trim()
+.trim();
+
+
+/*
+Paréntesis contables:
+(1,900.58)
+= -1900.58
+*/
+
+let negative = false;
+
+
+if (
+text.startsWith("(") &&
+text.endsWith(")")
+) {
+
+negative = true;
+
+text =
+text.slice(
+1,
+-1
+);
+
+}
+
+
+text =
+text
 .replace(
 /\s/g,
 ""
@@ -5726,7 +6649,10 @@ String(value)
 .replace(
 /\$/g,
 ""
-);
+)
+.replace(
+/%/g,
+"");
 
 
 if (
@@ -5802,21 +6728,38 @@ text.replace(
 );
 
 
-const number =
+let number =
 Number(text);
 
 
-return Number.isFinite(
+if (
+!Number.isFinite(
 number
 )
-? number
-: 0;
+) {
+
+return 0;
+
+}
+
+
+if (negative) {
+
+number =
+-Math.abs(
+number
+);
+
+}
+
+
+return number;
 
 }
 
 
 /* =========================================================
-NORMALIZAR TEXTO
+TEXTO
 ========================================================= */
 
 function normalizeText(value) {
@@ -5838,248 +6781,14 @@ value || ""
 }
 
 
-/* =========================================================
-FECHAS
-========================================================= */
-
-function parseExcelDate(
-value
+function valueFrom(
+row,
+candidates
 ) {
 
-if (!value) {
-return null;
-}
-
-
-if (
-value instanceof Date &&
-!isNaN(value)
-) {
-
-return value;
-
-}
-
-
-if (
-typeof value ===
-"number"
-) {
-
-const parsed =
-XLSX.SSF
-.parse_date_code(
-value
-);
-
-
-if (parsed) {
-
-return new Date(
-parsed.y,
-parsed.m - 1,
-parsed.d
-);
-
-}
-
-}
-
-
-const text =
-String(value)
-.trim();
-
-
-if (!text) {
-return null;
-}
-
-
-const match =
-text.match(
-/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/
-);
-
-
-if (match) {
-
-let year =
-Number(
-match[3]
-);
-
-
-if (
-year < 100
-) {
-
-year +=
-2000;
-
-}
-
-
-return new Date(
-year,
-Number(
-match[2]
-) - 1,
-Number(
-match[1]
-)
-);
-
-}
-
-
-const direct =
-new Date(text);
-
-
-if (
-!isNaN(direct)
-) {
-
-return direct;
-
-}
-
-
-return null;
-
-}
-
-
-function parseDate(value) {
-
-if (!value) {
-return null;
-}
-
-
-const date =
-new Date(
-`${value}T00:00:00`
-);
-
-
-return isNaN(date)
-? null
-: date;
-
-}
-
-
-function dateNumber(date) {
-
-return date
-? date.getTime()
-: Number.MAX_SAFE_INTEGER;
-
-}
-
-
-function startOfToday() {
-
-const now =
-new Date();
-
-
-return new Date(
-now.getFullYear(),
-now.getMonth(),
-now.getDate()
-);
-
-}
-
-
-function formatDate(date) {
-
-if (!date) {
-return "—";
-}
-
-
-return date
-.toLocaleDateString(
-"es-DO",
-{
-day:
-"2-digit",
-
-month:
-"short",
-
-year:
-"numeric"
-}
-);
-
-}
-
-
-function formatLongDate(date) {
-
-if (!date) {
-return "—";
-}
-
-
-return date
-.toLocaleDateString(
-"es-DO",
-{
-day:
-"numeric",
-
-month:
-"long",
-
-year:
-"numeric"
-}
-);
-
-}
-
-
-function formatPossibleDate(
-value
-) {
-
-const date =
-parseExcelDate(
-value
-);
-
-
-return date
-? formatDate(date)
-: value ||
-"—";
-
-}
-
-
-function monthYear(date) {
-
-if (!date) {
-return "—";
-}
-
-
-return date
-.toLocaleDateString(
-"es-DO",
-{
-month:
-"short",
-
-year:
-"numeric"
-}
+return getColumnValue(
+row,
+candidates
 );
 
 }
@@ -6162,39 +6871,13 @@ currency:
 "USD",
 
 maximumFractionDigits:
-0
+2
 }
 )
 .format(
 Number(value) ||
 0
 );
-
-}
-
-
-function formatOriginalMoney(
-value,
-currency
-) {
-
-const c =
-normalizeText(
-currency
-);
-
-
-if (
-c.includes("usd") ||
-c.includes("dolar")
-) {
-
-return usd(value);
-
-}
-
-
-return money(value);
 
 }
 
@@ -6365,10 +7048,44 @@ return `
 
 <div class="muted">
 
-${escapeHtml(text)}
+${escapeHtml(
+text
+)}
 
 </div>
 
 `;
+
+}
+
+
+/* =========================================================
+ESTADO VACÍO
+========================================================= */
+
+function renderEmptyState() {
+
+setText(
+"overviewSubtitle",
+"No fue posible cargar la plantilla de esta iniciativa."
+);
+
+
+[
+"kpiApprovedBudget",
+"kpiBudget",
+"kpiOrdered",
+"kpiPendingBuy",
+"kpiWeightedProgress",
+"kpiOpenIssues",
+"overviewDiscount",
+"overviewDiscountPct"
+].forEach(
+id =>
+setText(
+id,
+"—"
+)
+);
 
 }
